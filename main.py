@@ -19,6 +19,10 @@ GITLAB_TOKEN = os.getenv("GITLAB_TOKEN") or ''
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or ''
 OPENAI_HTTP_PROXY = os.getenv("OPENAI_HTTP_PROXY") or ''
 
+# Prompt 文件路径
+DETAILED_PROMPT_FILE = "detailed_prompt.txt"
+SUMMARY_PROMPT_FILE = "summary_prompt.txt"
+
 class ReviewResult:
     def __init__(self):
         self.comments = []
@@ -36,7 +40,19 @@ class Review(object):
         else:
             self.client = OpenAI(api_key=OPENAI_API_KEY)
 
-    def review_merge_request(self, merge_request_url: str):
+            # 读取 prompts
+        self.detailed_prompt = self.read_prompt(DETAILED_PROMPT_FILE)
+        self.summary_prompt = self.read_prompt(SUMMARY_PROMPT_FILE)
+
+    def read_prompt(self, file_path):
+        try:
+            with open(file_path, 'r') as file:
+                return file.read()
+        except FileNotFoundError:
+            print(f"Warning: Prompt file {file_path} not found. Using default prompt.")
+            return ""
+
+    def review_merge_request(self, merge_request_url: str, summary_only: bool = False):
         try:
             # 解析merge request URL
             project_id, merge_request_iid = self.parse_merge_request_url(merge_request_url)
@@ -49,18 +65,23 @@ class Review(object):
             changes = mr.changes()
 
             # 构建code review请求
-            review_request = self.build_review_request(changes)
+            review_request = self.build_review_request(changes, summary_only)
 
             # 调用OpenAI API进行code review
             review_result = self.call_openai_api(review_request)
 
-            parsed_result = self.parse_review_result(review_result)
+            parsed_result = self.parse_review_result(review_result, summary_only)
             print(parsed_result)
-            # 解析AI的响应并提交评论
-            self.submit_comments(mr, parsed_result.comments, changes)
 
-            if parsed_result.summary:
-                mr.notes.create({'body': parsed_result.summary})
+            if summary_only:
+                # 只提交摘要评论
+                if parsed_result.summary:
+                    mr.notes.create({'body': parsed_result.summary})
+            else:
+                # 提交行级评论和摘要评论
+                self.submit_comments(mr, parsed_result.comments, changes)
+                if parsed_result.summary:
+                    mr.notes.create({'body': parsed_result.summary})
 
             return {"status": "success", "message": "Code review completed and comments posted to merge request"}
 
@@ -73,51 +94,14 @@ class Review(object):
         merge_request_iid = parts[-1]
         return project_id, merge_request_iid
 
-    def build_review_request(self, changes):
+    def build_review_request(self, changes, summary_only):
         files_content = []
         for change in changes['changes']:
             files_content.append(f"File: {change['new_path']}\n\n{change['diff']}")
 
-        review_prompt = """
-        Please review the code with the following points in mind and provide suggestions:
-        1. **Code Structure and Readability**
-           - Does the code follow consistent naming conventions and coding style?
-           - Are the methods and classes concise, and does each adhere to the single responsibility principle?
-           - Are the comments clear, necessary, and accurate?
-        2. **Logic and Functionality**
-           - Does the code work as expected, and do all functionalities operate correctly?
-           - Are there any unhandled edge cases or potential bugs?
-           - Is there a more efficient or simpler way to implement the logic?
-        3. **Performance and Efficiency**
-           - Is there room for improving the performance of the code?
-           - Are there any parts of the code that could lead to performance bottlenecks?
-        4. **Security**
-           - Are there any potential security vulnerabilities?
-           - Is input validation and error handling adequate?
-        5. **Testing**
-           - Does the code include sufficient unit tests?
-           - Do the tests cover the main functionalities and edge cases?
+        prompt = self.summary_prompt if summary_only else self.detailed_prompt
+        return prompt + "\n\n" + "\n\n".join(files_content)
 
-        For each suggestion, please provide:
-        1. The file name
-        2. The line number or range of line numbers
-        3. Your comment or suggestion
-
-        Format your response as follows:
-        FILE: filename.py
-        LINES: 10-15
-        Your detailed comment or suggestion here.
-
-        FILE: another_file.py
-        LINE: 42
-        Another comment or suggestion.
-        
-        Do not add any char before FILE and LINE
-
-        Please provide specific code snippets and improvement suggestions so that the developers can easily understand and implement your feedback. Thank you!
-        """
-
-        return review_prompt + "\n\n" + "\n\n".join(files_content)
 
     def call_openai_api(self, review_request):
         try:
@@ -164,57 +148,61 @@ class Review(object):
                 print(
                     f"Comment details: File: {comment['file']}, Line: {comment['line']}, Comment: {comment['comment'][:50]}...")
 
-    def parse_review_result(self, review_result: str):
+    def parse_review_result(self, review_result: str, summary_only: bool):
         result = ReviewResult()
-        current_file = None
-        current_lines = None
-        current_comment = []
-        summary_started = False
+        if summary_only:
+            result.summary = review_result
+        else:
+            # 详细解析逻辑保持不变
+            current_file = None
+            current_lines = None
+            current_comment = []
+            summary_started = False
 
-        for line in review_result.split('\n'):
-            line = line.strip()
-            if line.startswith('FILE:'):
-                if current_file and current_lines is not None and current_comment:
-                    result.comments.append({
-                        'file': current_file,
-                        'line': current_lines,
-                        'comment': '\n'.join(current_comment)
-                    })
-                current_file = line.split(':')[1].strip()
-                current_lines = None
-                current_comment = []
-            elif line.startswith('LINES:') or line.startswith('LINE:'):
-                if current_file and current_lines is not None and current_comment:
-                    result.comments.append({
-                        'file': current_file,
-                        'line': current_lines,
-                        'comment': '\n'.join(current_comment)
-                    })
-                current_lines = line.split(':')[1].strip()
-                current_lines = int(current_lines.split('-')[-1])  # Get the last number
-                current_comment = []
-            elif line.startswith('General Comments:'):
-                summary_started = True
-                if current_file and current_lines is not None and current_comment:
-                    result.comments.append({
-                        'file': current_file,
-                        'line': current_lines,
-                        'comment': '\n'.join(current_comment)
-                    })
-                current_file = None
-                current_lines = None
-                current_comment = []
-            elif summary_started:
-                result.summary += line + '\n'
-            elif current_file is not None:
-                current_comment.append(line)
+            for line in review_result.split('\n'):
+                line = line.strip()
+                if line.startswith('FILE:'):
+                    if current_file and current_lines is not None and current_comment:
+                        result.comments.append({
+                            'file': current_file,
+                            'line': current_lines,
+                            'comment': '\n'.join(current_comment)
+                        })
+                    current_file = line.split(':')[1].strip()
+                    current_lines = None
+                    current_comment = []
+                elif line.startswith('LINES:') or line.startswith('LINE:'):
+                    if current_file and current_lines is not None and current_comment:
+                        result.comments.append({
+                            'file': current_file,
+                            'line': current_lines,
+                            'comment': '\n'.join(current_comment)
+                        })
+                    current_lines = line.split(':')[1].strip()
+                    current_lines = int(current_lines.split('-')[-1])  # Get the last number
+                    current_comment = []
+                elif line.startswith('General Comments:'):
+                    summary_started = True
+                    if current_file and current_lines is not None and current_comment:
+                        result.comments.append({
+                            'file': current_file,
+                            'line': current_lines,
+                            'comment': '\n'.join(current_comment)
+                        })
+                    current_file = None
+                    current_lines = None
+                    current_comment = []
+                elif summary_started:
+                    result.summary += line + '\n'
+                elif current_file is not None:
+                    current_comment.append(line)
 
-        if current_file and current_lines is not None and current_comment:
-            result.comments.append({
-                'file': current_file,
-                'line': current_lines,
-                'comment': '\n'.join(current_comment)
-            })
+            if current_file and current_lines is not None and current_comment:
+                result.comments.append({
+                    'file': current_file,
+                    'line': current_lines,
+                    'comment': '\n'.join(current_comment)
+                })
 
         return result
 
@@ -271,6 +259,7 @@ class Review(object):
 
 class MergeRequestInput(BaseModel):
     merge_request_url: str
+    summary_only: bool = False
 
 
 @app.post("/review")
