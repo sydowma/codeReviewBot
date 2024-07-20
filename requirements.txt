@@ -3,3 +3,5 @@ uvicorn
 python-gitlab
 openai
 httpx[socks]
+PyGithub
+python-dotenv

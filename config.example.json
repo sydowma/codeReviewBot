@@ -1,0 +1,7 @@
+{
+    "GITLAB_URL": "your_gitlab_url",
+    "GITLAB_TOKEN": "your_gitlab_token",
+    "GITHUB_TOKEN": "your_github_token",
+    "OPENAI_API_KEY": "your_openai_api_key",
+    "OPENAI_HTTP_PROXY": "your_http_proxy_if_any"
+}
