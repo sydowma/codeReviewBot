@@ -1,115 +1,157 @@
-# GitLab Code Review Bot
+# Code Review Tool
 
-## English Version
+This tool automates code reviews for GitLab merge requests and GitHub pull requests using OpenAI's GPT model.
 
-### Introduction
-GitLab Code Review Bot is an automated tool designed to streamline the code review process for GitLab merge requests. By leveraging OpenAI's GPT models, this bot provides intelligent, context-aware code reviews, helping developers identify potential issues and improve code quality.
+## Features
 
-### Features
-- Automated code review for GitLab merge requests
-- Two modes of operation:
-  1. Detailed review with line-specific comments
-  2. Summary-only review for a high-level overview
-- Customizable review prompts
-- Support for GitLab API and OpenAI API
-- Command-line interface and FastAPI web server
+- Supports both GitLab and GitHub repositories
+- Generates detailed, line-specific feedback on code changes
+- Provides summary reviews
+- Can be used as a CLI tool or run as a FastAPI server
 
-### Installation
+## Requirements
+
+- Python 3.7+
+- FastAPI
+- GitPython
+- PyGitHub
+- python-gitlab
+- OpenAI Python Client
+- python-dotenv
+- uvicorn (for running the FastAPI server)
+
+## Installation
+
 1. Clone the repository:
    ```
    git clone https://github.com/sydowma/codeReviewBot.git
    cd codeReviewBot
    ```
-2. Install dependencies:
+
+2. Install the required packages:
    ```
    pip install -r requirements.txt
    ```
-3. Set up environment variables:
-   - `GITLAB_URL`: Your GitLab instance URL
-   - `GITLAB_TOKEN`: Your GitLab personal access token
-   - `OPENAI_API_KEY`: Your OpenAI API key
-   - `OPENAI_HTTP_PROXY` (optional): HTTP proxy for OpenAI API calls
 
-### Usage
-1. Command-line interface:
-   - For detailed review:
-     ```
-     python main.py <merge_request_url>
-     ```
-   - For summary-only review:
-     ```
-     python main.py <merge_request_url> --summary-only
-     ```
+3. Set up your configuration:
+   - Create a `config.json` file with your GitLab, GitHub, and OpenAI API credentials.
+   - Alternatively, set up environment variables in a `.env` file.
 
-2. FastAPI web server:
-   - Start the server:
-     ```
-     python main.py
-     ```
-   - Send a POST request to `http://localhost:8000/review` with the following JSON body:
-     ```json
-     {
-       "merge_request_url": "https://your-gitlab-instance.com/project/merge_requests/123",
-       "summary_only": false
-     }
-     ```
+## Usage
 
-### Customization
-You can customize the review prompts by modifying the `detailed_prompt.txt` and `summary_prompt.txt` files in the project directory.
+### As a CLI tool
 
-## 中文版本
+```
+python main.py <url_to_merge_request_or_pull_request> [--summary-only]
+```
 
-### 简介
-GitLab 代码审查机器人是一个自动化工具，旨在简化 GitLab 合并请求的代码审查过程。通过利用 OpenAI 的 GPT 模型，该机器人提供智能、上下文感知的代码审查，帮助开发者识别潜在问题并提高代码质量。
+### As a FastAPI server
 
-### 功能特性
-- 自动化 GitLab 合并请求代码审查
-- 两种运行模式：
-  1. 详细审查，提供针对具体代码行的评论
-  2. 仅摘要审查，提供高层次概述
-- 可自定义审查提示词
-- 支持 GitLab API 和 OpenAI API
-- 命令行界面和 FastAPI 网络服务器
+1. Start the server:
+   ```
+   uvicorn main:app --host 0.0.0.0 --port 8000
+   ```
 
-### 安装
+2. Send a POST request to `http://localhost:8000/review` with the following JSON body:
+   ```json
+   {
+     "url": "https://gitlab.com/your-project/merge_requests/1",
+     "summary_only": false
+   }
+   ```
+
+## Configuration
+
+The tool uses the following configuration options:
+
+- `GITLAB_URL`: Your GitLab instance URL
+- `GITLAB_TOKEN`: Your GitLab personal access token
+- `GITHUB_TOKEN`: Your GitHub personal access token
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `OPENAI_HTTP_PROXY`: (Optional) HTTP proxy for OpenAI API calls
+
+You can set these in `config.json` or as environment variables.
+
+## Customization
+
+You can customize the review prompts by modifying the `detailed_prompt.txt` and `summary_prompt.txt` files.
+
+---
+
+# 代码审查工具
+
+这个工具使用OpenAI的GPT模型自动化GitLab合并请求和GitHub拉取请求的代码审查。
+
+## 特性
+
+- 支持GitLab和GitHub仓库
+- 生成详细的、针对具体行的代码变更反馈
+- 提供摘要审查
+- 可以作为CLI工具使用，也可以作为FastAPI服务器运行
+
+## 要求
+
+- Python 3.7+
+- FastAPI
+- GitPython
+- PyGitHub
+- python-gitlab
+- OpenAI Python客户端
+- python-dotenv
+- uvicorn（用于运行FastAPI服务器）
+
+## 安装
+
 1. 克隆仓库：
    ```
    git clone https://github.com/sydowma/codeReviewBot.git
    cd codeReviewBot
    ```
-2. 安装依赖：
+
+2. 安装所需包：
    ```
    pip install -r requirements.txt
    ```
-3. 设置环境变量：
-   - `GITLAB_URL`：您的 GitLab 实例 URL
-   - `GITLAB_TOKEN`：您的 GitLab 个人访问令牌
-   - `OPENAI_API_KEY`：您的 OpenAI API 密钥
-   - `OPENAI_HTTP_PROXY`（可选）：OpenAI API 调用的 HTTP 代理
 
-### 使用方法
-1. 命令行界面：
-   - 详细审查：
-     ```
-     python main.py <合并请求URL>
-     ```
-   - 仅摘要审查：
-     ```
-     python main.py <合并请求URL> --summary-only
-     ```
+3. 设置配置：
+   - 创建一个`config.json`文件，包含您的GitLab、GitHub和OpenAI API凭证。
+   - 或者，在`.env`文件中设置环境变量。
 
-2. FastAPI 网络服务器：
-   - 启动服务器：
-     ```
-     python main.py
-     ```
-   - 向 `http://localhost:8000/review` 发送 POST 请求，JSON 正文如下：
-     ```json
-     {
-       "merge_request_url": "https://your-gitlab-instance.com/project/merge_requests/123",
-       "summary_only": false
-     }
-     ```
+## 使用方法
 
-### 自定义
-您可以通过修改项目目录中的 `detailed_prompt.txt` 和 `summary_prompt.txt` 文件来自定义审查提示词。
+### 作为CLI工具
+
+```
+python main.py <合并请求或拉取请求的url> [--summary-only]
+```
+
+### 作为FastAPI服务器
+
+1. 启动服务器：
+   ```
+   uvicorn main:app --host 0.0.0.0 --port 8000
+   ```
+
+2. 向`http://localhost:8000/review`发送POST请求，JSON体如下：
+   ```json
+   {
+     "url": "https://gitlab.com/your-project/merge_requests/1",
+     "summary_only": false
+   }
+   ```
+
+## 配置
+
+该工具使用以下配置选项：
+
+- `GITLAB_URL`：您的GitLab实例URL
+- `GITLAB_TOKEN`：您的GitLab个人访问令牌
+- `GITHUB_TOKEN`：您的GitHub个人访问令牌
+- `OPENAI_API_KEY`：您的OpenAI API密钥
+- `OPENAI_HTTP_PROXY`：（可选）OpenAI API调用的HTTP代理
+
+您可以在`config.json`中设置这些选项，或者作为环境变量设置。
+
+## 自定义
+
+您可以通过修改`detailed_prompt.txt`和`summary_prompt.txt`文件来自定义审查提示。
