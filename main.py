@@ -207,7 +207,7 @@ class GitLabReview(BaseReview):
         super().__init__()
         self.gl = gitlab.Gitlab(GITLAB_URL, private_token=GITLAB_TOKEN)
 
-    def review_code_changes(self, merge_request_url: str, summary_only: bool = False):
+    def review_code_changes(self, merge_request_url: str, summary_only: bool):
         try:
             project_id, merge_request_iid = self.parse_url(merge_request_url)
             project = self.gl.projects.get(project_id)
@@ -235,7 +235,7 @@ class GitLabReview(BaseReview):
             return {"status": "error", "message": str(e)}
 
     def get_body(self, mr_description, mr_title):
-        mr_infomation = f"Merge Request Title: {mr_title}\n\nMerge Request Description: {mr_description}\n\n"
+        mr_infomation = f"Merge Request Title: {mr_title}\n Merge Request Description: {mr_description}\n\n"
         return mr_infomation
 
     def parse_url(self, url):
@@ -299,7 +299,7 @@ class GitHubReview(BaseReview):
         super().__init__()
         self.gh = Github(GITHUB_TOKEN)
 
-    def review_code_changes(self, pull_request_url: str, summary_only: bool = False):
+    def review_code_changes(self, pull_request_url: str, summary_only: bool):
         try:
             repo_full_name, pull_request_number = self.parse_url(pull_request_url)
             repo = self.gh.get_repo(repo_full_name)
@@ -377,7 +377,7 @@ class GitHubReview(BaseReview):
         return None
 
     def get_body(self, pr: PullRequest) -> str:
-        return f"Pull Request Title: {pr.title}\n\Pull Request Description: {pr.body}\n\n"
+        return f"Pull Request Title: {pr.title}\n Pull Request Description: {pr.body}\n\n"
 
 
 class CodeChangeInput(BaseModel):
@@ -401,7 +401,7 @@ async def api_review_code_changes(input: CodeChangeInput):
 def cli():
     parser = argparse.ArgumentParser(description="Code Review CLI")
     parser.add_argument("url", help="URL of the GitLab merge request or GitHub pull request to review")
-    parser.add_argument("--summary-only", action="store_true", help="Generate only a summary review")
+    parser.add_argument("--summary", action="store_true", help="Generate only a summary review", default=True)
     args = parser.parse_args()
 
     if "gitlab" in args.url:
@@ -412,7 +412,7 @@ def cli():
         print("Error: Unsupported repository type", file=sys.stderr)
         sys.exit(1)
 
-    result = review.review_code_changes(args.url, args.summary_only)
+    result = review.review_code_changes(args.url, args.summary)
     if result["status"] == "success":
         print(result["message"])
     else:
