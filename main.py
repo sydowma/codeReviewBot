@@ -170,7 +170,7 @@ class BaseReview(ABC):
         pass
 
     @abstractmethod
-    def build_review_request(self, changes, summary_only):
+    def build_review_request(self, changes: object, summary_only: bool, mr_information: str) -> object:
         pass
 
     @abstractmethod
@@ -213,7 +213,12 @@ class GitLabReview(BaseReview):
             project = self.gl.projects.get(project_id)
             mr = project.mergerequests.get(merge_request_iid)
             changes = mr.changes()
-            review_request = self.build_review_request(changes, summary_only)
+            mr_title = mr.title
+            mr_description = mr.description
+
+            mr_infomation = self.get_body(mr_description, mr_title)
+
+            review_request = self.build_review_request(changes, summary_only, mr_infomation)
             review_result = self.call_openai_api(review_request)
             parsed_result = self.parse_review_result(review_result, summary_only)
 
@@ -229,19 +234,23 @@ class GitLabReview(BaseReview):
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    def get_body(self, mr_description, mr_title):
+        mr_infomation = f"Merge Request Title: {mr_title}\n\nMerge Request Description: {mr_description}\n\n"
+        return mr_infomation
+
     def parse_url(self, url):
         parts = url.split('/')
         project_id = parts[-5] + '/' + parts[-4]
         merge_request_iid = parts[-1]
         return project_id, merge_request_iid
 
-    def build_review_request(self, changes, summary_only):
+    def build_review_request(self, changes, summary_only, mr_infomation: str):
         files_content = []
         for change in changes['changes']:
             files_content.append(f"File: {change['new_path']}\n\n{change['diff']}")
 
         prompt = self.summary_prompt if summary_only else self.detailed_prompt
-        return prompt + "\n\n" + "\n\n".join(files_content)
+        return prompt + "\n\n" + mr_infomation + "\n\n".join(files_content)
 
     def submit_comments(self, mr, comments, changes):
         for comment in comments:
@@ -331,13 +340,13 @@ class GitHubReview(BaseReview):
             })
         return changes
 
-    def build_review_request(self, changes, summary_only: bool, body: str):
+    def build_review_request(self, changes, summary_only: bool, mr_infomation: str):
         files_content = []
         for change in changes['changes']:
             files_content.append(f"File: {change['new_path']}\n\n{change['diff']}")
 
         prompt = self.summary_prompt if summary_only else self.detailed_prompt
-        return prompt + "\n\n" + body + "\n\n" + "\n\n".join(files_content)
+        return prompt + "\n\n" + mr_infomation + "\n\n" + "\n\n".join(files_content)
 
     def submit_comments(self, pr, comments, changes):
         for comment in comments:
@@ -368,7 +377,7 @@ class GitHubReview(BaseReview):
         return None
 
     def get_body(self, pr: PullRequest) -> str:
-        return pr.body
+        return f"Pull Request Title: {pr.title}\n\Pull Request Description: {pr.body}\n\n"
 
 
 class CodeChangeInput(BaseModel):
