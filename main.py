@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 from fastapi import FastAPI, HTTPException
+from github.PullRequest import PullRequest
 from pydantic import BaseModel
 import requests
 import gitlab
@@ -295,7 +296,9 @@ class GitHubReview(BaseReview):
             repo = self.gh.get_repo(repo_full_name)
             pr = repo.get_pull(pull_request_number)
             changes = self.get_pull_request_changes(pr)
-            review_request = self.build_review_request(changes, summary_only)
+            body: str = self.get_body(pr)
+            review_request = self.build_review_request(changes, summary_only, body)
+            print(review_request)
             review_result = self.call_openai_api(review_request)
             parsed_result = self.parse_review_result(review_result, summary_only)
 
@@ -328,13 +331,13 @@ class GitHubReview(BaseReview):
             })
         return changes
 
-    def build_review_request(self, changes, summary_only):
+    def build_review_request(self, changes, summary_only: bool, body: str):
         files_content = []
         for change in changes['changes']:
             files_content.append(f"File: {change['new_path']}\n\n{change['diff']}")
 
         prompt = self.summary_prompt if summary_only else self.detailed_prompt
-        return prompt + "\n\n" + "\n\n".join(files_content)
+        return prompt + "\n\n" + body + "\n\n" + "\n\n".join(files_content)
 
     def submit_comments(self, pr, comments, changes):
         for comment in comments:
@@ -363,6 +366,10 @@ class GitHubReview(BaseReview):
                         'position': new_line
                     }
         return None
+
+    def get_body(self, pr: PullRequest) -> str:
+        return pr.body
+
 
 class CodeChangeInput(BaseModel):
     url: str
