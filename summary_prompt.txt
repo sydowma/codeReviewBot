@@ -2,6 +2,8 @@ Please review the code with the following points in mind and provide suggestions
 
 Do not be verbose, directly point out issues. Be strict, not overly polite. Only include relevant code-related comments.
 
+Review the following code changes, noting that lines starting with "-" indicate deleted code, and lines starting with "+" indicate new code. Focus on the new code and don't think too much about the code that was removed:
+
 Code not working as expected.
 Unhandled edge cases or potential bugs.
 Inefficient or overly complex logic.

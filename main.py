@@ -247,7 +247,13 @@ class GitLabReview(BaseReview):
     def build_review_request(self, changes, summary_only, mr_infomation: str):
         files_content = []
         for change in changes['changes']:
-            files_content.append(f"File: {change['new_path']}\n\n{change['diff']}")
+            is_update: bool = change['new_path'] == change['old_path']
+            if is_update:
+                change_type = 'Update'
+            else:
+                change_type = 'Add' if change['old_path'] == '/dev/null' else 'Delete'
+
+            files_content.append(f"Change type is {change_type} File: {change['new_path']}\n\n{change['diff']}")
 
         prompt = self.summary_prompt if summary_only else self.detailed_prompt
         return prompt + "\n\n" + mr_infomation + "\n\n".join(files_content)
