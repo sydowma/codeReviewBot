@@ -16,7 +16,7 @@ import re
 from abc import ABC, abstractmethod
 
 from dotenv import load_dotenv
-
+from pygments.lexer import default
 
 app = FastAPI()
 
@@ -35,7 +35,10 @@ def load_config(config_path=DEFAULT_CONFIG_PATH, env_file=DEFAULT_ENV_FILE):
         "GITLAB_TOKEN": "",
         "GITHUB_TOKEN": "",
         "OPENAI_API_KEY": "",
-        "OPENAI_HTTP_PROXY": ""
+        "OPENAI_HTTP_PROXY": "",
+        "OLLAMA_URL": "http://localhost:11434",  # Default Ollama URL
+        "AI_PROVIDER": "openai",  # Default AI provider
+        "MODEL": "gpt-4o",  # Default model
     }
 
     # 如果配置文件存在，从文件中读取配置
@@ -59,7 +62,9 @@ GITLAB_TOKEN = config['GITLAB_TOKEN']
 GITHUB_TOKEN = config['GITHUB_TOKEN']
 OPENAI_API_KEY = config['OPENAI_API_KEY']
 OPENAI_HTTP_PROXY = config['OPENAI_HTTP_PROXY']
-
+OLLAMA_URL = config['OLLAMA_URL']
+AI_PROVIDER = config['AI_PROVIDER']
+MODEL = config['MODEL']
 
 # Prompt file paths
 DETAILED_PROMPT_FILE = "detailed_prompt.txt"
@@ -74,13 +79,18 @@ class BaseReview(ABC):
     def __init__(self):
         self.detailed_prompt = self.read_prompt(DETAILED_PROMPT_FILE)
         self.summary_prompt = self.read_prompt(SUMMARY_PROMPT_FILE)
+        self.ai_provider = AI_PROVIDER
+        self.model = MODEL
 
         # Initialize OpenAI client
-        if len(OPENAI_HTTP_PROXY) > 0:
-            http_client = httpx.Client(proxies={"http://": OPENAI_HTTP_PROXY, "https://": OPENAI_HTTP_PROXY})
-            self.client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
-        else:
-            self.client = OpenAI(api_key=OPENAI_API_KEY)
+        if self.ai_provider == "openai":
+            if len(OPENAI_HTTP_PROXY) > 0:
+                http_client = httpx.Client(proxies={"http://": OPENAI_HTTP_PROXY, "https://": OPENAI_HTTP_PROXY})
+                self.client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
+            else:
+                self.client = OpenAI(api_key=OPENAI_API_KEY)
+        elif self.ai_provider == "ollama":
+            self.client = httpx.Client(base_url=OLLAMA_URL, timeout=120)
 
     def read_prompt(self, file_path):
         try:
@@ -90,18 +100,29 @@ class BaseReview(ABC):
             print(f"Warning: Prompt file {file_path} not found. Using default prompt.")
             return ""
 
-    def call_openai_api(self, review_request):
+    def call_ai_api(self, review_request):
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "You are an expert code reviewer. Provide detailed, line-specific feedback on the code changes."},
-                    {"role": "user", "content": review_request}
-                ]
-            )
-            return response.choices[0].message.content
+            if self.ai_provider == "openai":
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system",
+                         "content": "You are an expert code reviewer. Provide detailed, line-specific feedback on the code changes."},
+                        {"role": "user", "content": review_request}
+                    ]
+                )
+                return response.choices[0].message.content
+            elif self.ai_provider == "ollama":
+                response = self.client.post("/api/generate", json={
+                    "model": self.model,
+                    "prompt": review_request,
+                    "stream": False
+                })
+                return response.json()['response']
+            else:
+                raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
         except Exception as e:
-            print(f"Error calling OpenAI API: {e}", file=sys.stderr)
+            print(f"Error calling AI API: {e}", file=sys.stderr)
             return "Error: Unable to complete code review due to API issues."
 
     def parse_review_result(self, review_result: str, summary_only: bool):
@@ -219,7 +240,7 @@ class GitLabReview(BaseReview):
             mr_infomation = self.get_body(mr_description, mr_title)
 
             review_request = self.build_review_request(changes, summary_only, mr_infomation)
-            review_result = self.call_openai_api(review_request)
+            review_result = self.call_ai_api(review_request)
             parsed_result = self.parse_review_result(review_result, summary_only)
 
             if summary_only:
@@ -313,8 +334,7 @@ class GitHubReview(BaseReview):
             changes = self.get_pull_request_changes(pr)
             body: str = self.get_body(pr)
             review_request = self.build_review_request(changes, summary_only, body)
-            print(review_request)
-            review_result = self.call_openai_api(review_request)
+            review_result = self.call_ai_api(review_request)
             parsed_result = self.parse_review_result(review_result, summary_only)
 
             if summary_only:
@@ -389,6 +409,8 @@ class GitHubReview(BaseReview):
 class CodeChangeInput(BaseModel):
     url: str
     summary_only: bool = False
+    ai_provider: str = "openai"
+    model: str = "gpt-4o"
 
 @app.post("/review")
 async def api_review_code_changes(input: CodeChangeInput):
@@ -417,6 +439,10 @@ def cli():
     else:
         print("Error: Unsupported repository type", file=sys.stderr)
         sys.exit(1)
+
+    # Update AI provider and model based on CLI arguments
+    review.ai_provider = AI_PROVIDER
+    review.model = MODEL
 
     result = review.review_code_changes(args.url, args.summary)
     if result["status"] == "success":
