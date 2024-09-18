@@ -3,3 +3,5 @@ config.json
 venv/
 
 run.sh
+
+.idea/

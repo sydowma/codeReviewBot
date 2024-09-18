@@ -3,12 +3,19 @@ import json
 import os
 import sys
 import argparse
+from contextlib import asynccontextmanager
+from datetime import time
+from sched import scheduler
+from threading import Thread
+from time import sleep
+
+from charset_normalizer.constant import LANGUAGE_SUPPORTED_COUNT
 from fastapi import FastAPI, HTTPException
 from github.PullRequest import PullRequest
 from pydantic import BaseModel
 import requests
 import gitlab
-from github import Github
+from github import Github, logger
 from openai import OpenAI
 import uvicorn
 import httpx
@@ -17,8 +24,33 @@ from abc import ABC, abstractmethod
 
 from dotenv import load_dotenv
 from pygments.lexer import default
+from fastapi import BackgroundTasks, FastAPI
 
-app = FastAPI()
+# 最后一次拉取的PR编号，服务启动后设置默认值
+LATEST_PULL_REQUEST_NUMBER: int = 0
+
+def background_task():
+    while True:
+        # get github latest pull request
+        git = GitHubReview()
+        git.review_last_pull_request()
+        print("执行定时任务...")
+        sleep(10)
+
+# 创建 Lifespan 管理器
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("应用启动前的初始化...")
+    # 启动定时任务线程
+    task = Thread(target=background_task)
+    task.daemon = True
+    task.start()
+    # 可以在这里初始化数据库连接、缓存、队列等资源
+    yield
+    print("应用关闭后的清理...")
+    # 可以在这里关闭数据库连接、清理缓存等
+
+app = FastAPI(lifespan=lifespan)
 
 # 配置文件的默认路径
 DEFAULT_CONFIG_PATH = 'config.json'
@@ -405,6 +437,24 @@ class GitHubReview(BaseReview):
     def get_body(self, pr: PullRequest) -> str:
         return f"Pull Request Title: {pr.title}\n Pull Request Description: {pr.body}\n\n"
 
+    def review_last_pull_request(self):
+        global LATEST_PULL_REQUEST_NUMBER
+        pull_requests = self.gh.get_repo(GITLAB_URL).get_pulls(state='open', sort='created', direction='desc')
+        if LATEST_PULL_REQUEST_NUMBER == 0:
+            LATEST_PULL_REQUEST_NUMBER = pull_requests[0].number
+            logger.info(f"Set latest pull request number to {LATEST_PULL_REQUEST_NUMBER}")
+            return
+        for pr in pull_requests:
+            if pr.number > LATEST_PULL_REQUEST_NUMBER:
+                changes = self.get_pull_request_changes(pr)
+                body: str = self.get_body(pr)
+                review_request = self.build_review_request(changes, False, body)
+                review_result = self.call_ai_api(review_request)
+                parsed_result = self.parse_review_result(review_result, False)
+                self.submit_comments(pr, parsed_result.comments, changes)
+                LATEST_PULL_REQUEST_NUMBER = pr.number
+                logger.info(f"Reviewed pull request #{pr.number}")
+
 
 class CodeChangeInput(BaseModel):
     url: str
@@ -450,6 +500,9 @@ def cli():
     else:
         print(f"Error: {result['message']}", file=sys.stderr)
         sys.exit(1)
+
+
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
