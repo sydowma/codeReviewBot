@@ -8,10 +8,13 @@ from datetime import time
 from sched import scheduler
 from threading import Thread
 from time import sleep
+from typing import Union, Literal, List
 
+import typer
 from charset_normalizer.constant import LANGUAGE_SUPPORTED_COUNT
 from fastapi import FastAPI, HTTPException
 from github.PullRequest import PullRequest
+from github.PullRequestComment import PullRequestComment
 from pydantic import BaseModel
 import requests
 import gitlab
@@ -25,6 +28,7 @@ from abc import ABC, abstractmethod
 from dotenv import load_dotenv
 from pygments.lexer import default
 from fastapi import BackgroundTasks, FastAPI
+from pygments.styles.dracula import comment
 
 # 最后一次拉取的PR编号，服务启动后设置默认值
 LATEST_PULL_REQUEST_NUMBER: int = 0
@@ -51,6 +55,7 @@ async def lifespan(app: FastAPI):
     # 可以在这里关闭数据库连接、清理缓存等
 
 app = FastAPI(lifespan=lifespan)
+cli = typer.Typer()
 
 # 配置文件的默认路径
 DEFAULT_CONFIG_PATH = 'config.json'
@@ -104,8 +109,61 @@ SUMMARY_PROMPT_FILE = "summary_prompt.txt"
 
 class ReviewResult:
     def __init__(self):
-        self.comments = []
+        self.comments: list[ReviewComment] = []
         self.summary = ""
+
+class AIClient(ABC):
+    @abstractmethod
+    def get_client(self):
+        pass
+
+class OpenAIClient(AIClient):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.http_proxy = OPENAI_HTTP_PROXY
+
+    def get_client(self) -> OpenAI:
+        if len(OPENAI_HTTP_PROXY) > 0:
+            http_client = httpx.Client(proxies={"http://": self.http_proxy, "https://": self.http_proxy})
+            return OpenAI(api_key=self.api_key, http_client=http_client)
+        return OpenAI(api_key=self.api_key)
+
+class OllamaClient(AIClient):
+    def __init__(self, base_url: str, timeout: int = 120):
+        self.base_url = base_url
+        self.timeout = timeout
+
+    def get_client(self) -> httpx.Client:
+        return httpx.Client(base_url=self.base_url, timeout=self.timeout)
+
+class AIClientFactory:
+    @staticmethod
+    def create_client(provider: str, **kwargs) -> AIClient:
+        if provider == "openai":
+            return OpenAIClient(**kwargs)
+        elif provider == "ollama":
+            return OllamaClient(**kwargs)
+        else:
+            raise ValueError(f"Unsupported AI provider: {provider}")
+
+class IssueByLineNumber(BaseModel):
+    comment: str
+    start_line: int
+    end_line: int
+
+class FileIssues(BaseModel):
+    file_path: str
+    issues: list[IssueByLineNumber]
+
+class IssuesComment(BaseModel):
+    summary: str
+    file_issues: list[FileIssues]
+
+class ReviewComment(BaseModel):
+    file: str
+    start_line: int
+    end_line: int
+    comment: str
 
 class BaseReview(ABC):
     def __init__(self):
@@ -113,16 +171,8 @@ class BaseReview(ABC):
         self.summary_prompt = self.read_prompt(SUMMARY_PROMPT_FILE)
         self.ai_provider = AI_PROVIDER
         self.model = MODEL
-
-        # Initialize OpenAI client
-        if self.ai_provider == "openai":
-            if len(OPENAI_HTTP_PROXY) > 0:
-                http_client = httpx.Client(proxies={"http://": OPENAI_HTTP_PROXY, "https://": OPENAI_HTTP_PROXY})
-                self.client = OpenAI(api_key=OPENAI_API_KEY, http_client=http_client)
-            else:
-                self.client = OpenAI(api_key=OPENAI_API_KEY)
-        elif self.ai_provider == "ollama":
-            self.client = httpx.Client(base_url=OLLAMA_URL, timeout=120)
+        self.ai_client: AIClient = AIClientFactory.create_client(AI_PROVIDER, api_key=OPENAI_API_KEY)
+        self.client: Union[OpenAI, httpx.Client] = self.ai_client.get_client()
 
     def read_prompt(self, file_path):
         try:
@@ -132,18 +182,31 @@ class BaseReview(ABC):
             print(f"Warning: Prompt file {file_path} not found. Using default prompt.")
             return ""
 
-    def call_ai_api(self, review_request):
+    def call_ai_api(self, review_request, summary_only=False):
         try:
             if self.ai_provider == "openai":
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system",
-                         "content": "You are an expert code reviewer. Provide detailed, line-specific feedback on the code changes."},
-                        {"role": "user", "content": review_request}
-                    ]
-                )
-                return response.choices[0].message.content
+                if summary_only is True:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system",
+                             "content": "You are an expert code reviewer with programmer. Provide detailed, feedback on the code changes."},
+                            {"role": "user", "content": review_request}
+                        ]
+                    )
+                    return response.choices[0].message.content
+
+                if summary_only is False:
+                    response = self.client.beta.chat.completions.parse(
+                        model=self.model,
+                        messages=[
+                            {"role": "system",
+                            "content": "You are an expert code reviewer with programmer. Provide detailed, line-specific feedback on the code changes."},
+                            {"role": "user", "content": review_request}
+                        ],
+                        response_format=IssuesComment
+                    )
+                    return response.choices[0].message.parsed
             elif self.ai_provider == "ollama":
                 response = self.client.post("/api/generate", json={
                     "model": self.model,
@@ -157,60 +220,19 @@ class BaseReview(ABC):
             print(f"Error calling AI API: {e}", file=sys.stderr)
             return "Error: Unable to complete code review due to API issues."
 
-    def parse_review_result(self, review_result: str, summary_only: bool):
+    def parse_review_result(self, review_result: Union[str, IssuesComment], summary_only: bool) -> ReviewResult:
         result = ReviewResult()
         if summary_only:
             result.summary = review_result
         else:
-            current_file = None
-            current_lines = None
-            current_comment = []
-            summary_started = False
-
-            for line in review_result.split('\n'):
-                line = line.strip()
-                if line.startswith('FILE:'):
-                    if current_file and current_lines is not None and current_comment:
-                        result.comments.append({
-                            'file': current_file,
-                            'line': current_lines,
-                            'comment': '\n'.join(current_comment)
-                        })
-                    current_file = line.split(':')[1].strip()
-                    current_lines = None
-                    current_comment = []
-                elif line.startswith('LINES:') or line.startswith('LINE:'):
-                    if current_file and current_lines is not None and current_comment:
-                        result.comments.append({
-                            'file': current_file,
-                            'line': current_lines,
-                            'comment': '\n'.join(current_comment)
-                        })
-                    current_lines = line.split(':')[1].strip()
-                    current_lines = int(current_lines.split('-')[-1])  # Get the last number
-                    current_comment = []
-                elif line.startswith('General Comments:'):
-                    summary_started = True
-                    if current_file and current_lines is not None and current_comment:
-                        result.comments.append({
-                            'file': current_file,
-                            'line': current_lines,
-                            'comment': '\n'.join(current_comment)
-                        })
-                    current_file = None
-                    current_lines = None
-                    current_comment = []
-                elif summary_started:
-                    result.summary += line + '\n'
-                elif current_file is not None:
-                    current_comment.append(line)
-
-            if current_file and current_lines is not None and current_comment:
-                result.comments.append({
-                    'file': current_file,
-                    'line': current_lines,
-                    'comment': '\n'.join(current_comment)
-                })
+            print(review_result)
+            issues_comment = review_result
+            result.summary = issues_comment.summary
+            for file_issue in issues_comment.file_issues:
+                for issue in file_issue.issues:
+                    result.comments.append(
+                        ReviewComment(file=file_issue.file_path, start_line=issue.start_line, end_line=issue.end_line, comment=issue.comment)
+                    )
 
         return result
 
@@ -231,24 +253,29 @@ class BaseReview(ABC):
         pass
 
     @abstractmethod
-    def create_position(self, code_change, changes, file_path, line_number):
+    def create_position(self, code_change, changes, file_path, line_number, end_line):
         pass
 
     def find_line_numbers(self, diff, target_line):
         lines = diff.split('\n')
         old_line = new_line = 0
         for line in lines:
-            if line.startswith('+'):
+            if line.startswith('@@'):
+                # Parse the hunk header
+                match = re.match(r'@@ -(\d+),\d+ \+(\d+),\d+ @@', line)
+                if match:
+                    old_line = int(match.group(1)) - 1
+                    new_line = int(match.group(2)) - 1
+            elif line.startswith('+'):
                 new_line += 1
-                if new_line == target_line:
-                    return old_line, new_line
             elif line.startswith('-'):
                 old_line += 1
             else:
                 old_line += 1
                 new_line += 1
-                if new_line == target_line:
-                    return old_line, new_line
+
+            if new_line == target_line:
+                return old_line, new_line
         return None, None
 
     def generate_line_code(self, file_path, old_line, new_line):
@@ -326,7 +353,7 @@ class GitLabReview(BaseReview):
                 print(f"Failed to create comment: {e}")
                 print(f"Comment details: File: {comment['file']}, Line: {comment['line']}, Comment: {comment['comment'][:50]}...")
 
-    def create_position(self, mr, changes, file_path, line_number):
+    def create_position(self, mr, changes, file_path, line_number, end_line):
         for change in changes['changes']:
             if change['new_path'] == file_path:
                 old_line, new_line = self.find_line_numbers(change['diff'], line_number)
@@ -366,7 +393,7 @@ class GitHubReview(BaseReview):
             changes = self.get_pull_request_changes(pr)
             body: str = self.get_body(pr)
             review_request = self.build_review_request(changes, summary_only, body)
-            review_result = self.call_ai_api(review_request)
+            review_result = self.call_ai_api(review_request, summary_only)
             parsed_result = self.parse_review_result(review_result, summary_only)
 
             if summary_only:
@@ -406,31 +433,39 @@ class GitHubReview(BaseReview):
         prompt = self.summary_prompt if summary_only else self.detailed_prompt
         return prompt + "\n\n" + mr_infomation + "\n\n" + "\n\n".join(files_content)
 
-    def submit_comments(self, pr, comments, changes):
+    def submit_comments(self, pr, comments: list[ReviewComment], changes):
         for comment in comments:
             try:
-                position = self.create_position(pr, changes, comment['file'], comment['line'])
+                position = self.create_position(pr, changes, comment.file, comment.start_line, comment.end_line)
                 if position:
-                    pr.create_review_comment(
-                        body=comment['comment'],
+                    head_commit = pr.get_commits().reversed[0]
+                    pr_comment = pr.create_review_comment(
+                        body=comment.comment,
                         path=position['path'],
-                        position=position['position'],
-                        commit_id=pr.head.sha
+                        line=position['line'],
+                        side=position['side'],
+                        commit=head_commit
                     )
+                    print(f"Created comment: {pr_comment}")
                 else:
-                    print(f"Warning: Could not create position for file {comment['file']} line {comment['line']}. Skipping comment.")
+                    print(
+                        f"Warning: Could not create position for file {comment.file} line {comment.end_line}. Skipping comment.")
             except Exception as e:
-                print(f"Failed to create comment: {e}")
-                print(f"Comment details: File: {comment['file']}, Line: {comment['line']}, Comment: {comment['comment'][:50]}...")
+                print(f"Failed to create comment. Error type: {type(e).__name__}")
+                print(f"Error message: {str(e)}")
+                print(
+                    f"Comment details: File: {comment.file}, Line: {comment.end_line}, Comment: {comment.comment[:50]}...")
 
-    def create_position(self, pr, changes, file_path, line_number):
+    def create_position(self, pr, changes, file_path, target_line, end_line):
         for change in changes['changes']:
             if change['new_path'] == file_path:
-                old_line, new_line = self.find_line_numbers(change['diff'], line_number)
+                old_line, new_line = self.find_line_numbers(change['diff'], target_line)
                 if old_line is not None and new_line is not None:
                     return {
                         'path': file_path,
-                        'position': new_line
+                        'position': new_line,
+                        'line': new_line,
+                        'side': 'RIGHT'
                     }
         return None
 
@@ -479,7 +514,8 @@ async def api_review_code_changes(input: CodeChangeInput):
 def cli():
     parser = argparse.ArgumentParser(description="Code Review CLI")
     parser.add_argument("url", help="URL of the GitLab merge request or GitHub pull request to review")
-    parser.add_argument("--summary", action="store_true", help="Generate only a summary review", default=True)
+    parser.add_argument("--summary", action="store_true", default=True, help="Generate a summary review")
+    parser.add_argument("--no-summary", action="store_false", dest="summary", help="Do not generate a summary review")
     args = parser.parse_args()
 
     if "gitlab" in args.url:
