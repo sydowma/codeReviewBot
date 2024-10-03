@@ -1,34 +1,26 @@
+import argparse
 import hashlib
 import json
 import os
+import re
 import sys
-import argparse
+from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
-from datetime import time
-from sched import scheduler
 from threading import Thread
 from time import sleep
-from typing import Union, Literal, List
+from typing import Union
 
-import typer
-from charset_normalizer.constant import LANGUAGE_SUPPORTED_COUNT
-from fastapi import FastAPI, HTTPException
-from github.PullRequest import PullRequest
-from github.PullRequestComment import PullRequestComment
-from pydantic import BaseModel
-import requests
 import gitlab
-from github import Github, logger
-from openai import OpenAI
-import uvicorn
 import httpx
-import re
-from abc import ABC, abstractmethod
-
+import typer
+import uvicorn
 from dotenv import load_dotenv
-from pygments.lexer import default
-from fastapi import BackgroundTasks, FastAPI
-from pygments.styles.dracula import comment
+from fastapi import FastAPI
+from fastapi import HTTPException
+from github import Github, logger
+from github.PullRequest import PullRequest
+from openai import OpenAI
+from pydantic import BaseModel
 
 # 最后一次拉取的PR编号，服务启动后设置默认值
 LATEST_PULL_REQUEST_NUMBER: int = 0
