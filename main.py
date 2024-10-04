@@ -60,6 +60,7 @@ def load_config(config_path=DEFAULT_CONFIG_PATH, env_file=DEFAULT_ENV_FILE):
     config = {
         "GITLAB_URL": "",
         "GITLAB_TOKEN": "",
+        "GITHUB_REPO_URL": "",
         "GITHUB_TOKEN": "",
         "OPENAI_API_KEY": "",
         "OPENAI_HTTP_PROXY": "",
@@ -464,7 +465,7 @@ class GitHubReview(BaseReview):
 
     def review_last_pull_request(self):
         global LATEST_PULL_REQUEST_NUMBER
-        pull_requests = self.gh.get_repo(GITLAB_URL).get_pulls(state='open', sort='created', direction='desc')
+        pull_requests = self.gh.get_repo(config['GITHUB_REPO_URL']).get_pulls(state='open', sort='created', direction='desc')
         if LATEST_PULL_REQUEST_NUMBER == 0:
             LATEST_PULL_REQUEST_NUMBER = pull_requests[0].number
             logger.info(f"Set latest pull request number to {LATEST_PULL_REQUEST_NUMBER}")

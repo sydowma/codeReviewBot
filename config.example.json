@@ -2,6 +2,9 @@
     "GITLAB_URL": "your_gitlab_url",
     "GITLAB_TOKEN": "your_gitlab_token",
     "GITHUB_TOKEN": "your_github_token",
+    "GITHUB_REPO_URL": "your_github_repo_url",
     "OPENAI_API_KEY": "your_openai_api_key",
-    "OPENAI_HTTP_PROXY": "your_http_proxy_if_any"
+    "OPENAI_HTTP_PROXY": "",
+    "AI_PROVIDER": "openai",
+    "MODEL": "gpt-4o"
 }
