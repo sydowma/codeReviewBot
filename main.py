@@ -472,12 +472,7 @@ class GitHubReview(BaseReview):
             return
         for pr in pull_requests:
             if pr.number > LATEST_PULL_REQUEST_NUMBER:
-                changes = self.get_pull_request_changes(pr)
-                body: str = self.get_body(pr)
-                review_request = self.build_review_request(changes, False, body)
-                review_result = self.call_ai_api(review_request)
-                parsed_result = self.parse_review_result(review_result, False)
-                self.submit_comments(pr, parsed_result.comments, changes)
+                self.review_code_changes(pr.url, False)
                 LATEST_PULL_REQUEST_NUMBER = pr.number
                 logger.info(f"Reviewed pull request #{pr.number}")
 
