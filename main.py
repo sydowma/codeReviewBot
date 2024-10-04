@@ -12,7 +12,6 @@ from typing import Union
 
 import gitlab
 import httpx
-import typer
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -47,7 +46,6 @@ async def lifespan(app: FastAPI):
     # 可以在这里关闭数据库连接、清理缓存等
 
 app = FastAPI(lifespan=lifespan)
-cli = typer.Typer()
 
 # 配置文件的默认路径
 DEFAULT_CONFIG_PATH = 'config.json'
