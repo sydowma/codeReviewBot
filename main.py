@@ -139,8 +139,7 @@ class AIClientFactory:
 
 class IssueByLineNumber(BaseModel):
     comment: str
-    start_line: int
-    end_line: int
+    line: int
 
 class FileIssues(BaseModel):
     file_path: str
@@ -152,8 +151,7 @@ class IssuesComment(BaseModel):
 
 class ReviewComment(BaseModel):
     file: str
-    start_line: int
-    end_line: int
+    line: int
     comment: str
 
 class BaseReview(ABC):
@@ -222,7 +220,7 @@ class BaseReview(ABC):
             for file_issue in issues_comment.file_issues:
                 for issue in file_issue.issues:
                     result.comments.append(
-                        ReviewComment(file=file_issue.file_path, start_line=issue.start_line, end_line=issue.end_line, comment=issue.comment)
+                        ReviewComment(file=file_issue.file_path, line=issue.line, comment=issue.comment)
                     )
 
         return result
@@ -244,7 +242,7 @@ class BaseReview(ABC):
         pass
 
     @abstractmethod
-    def create_position(self, code_change, changes, file_path, line_number, end_line):
+    def create_position(self, code_change, changes, file_path, line_number):
         pass
 
     def find_line_numbers(self, diff, target_line):
@@ -344,7 +342,7 @@ class GitLabReview(BaseReview):
                 print(f"Failed to create comment: {e}")
                 print(f"Comment details: File: {comment['file']}, Line: {comment['line']}, Comment: {comment['comment'][:50]}...")
 
-    def create_position(self, mr, changes, file_path, line_number, end_line):
+    def create_position(self, mr, changes, file_path, line_number):
         for change in changes['changes']:
             if change['new_path'] == file_path:
                 old_line, new_line = self.find_line_numbers(change['diff'], line_number)
@@ -427,7 +425,7 @@ class GitHubReview(BaseReview):
     def submit_comments(self, pr, comments: list[ReviewComment], changes):
         for comment in comments:
             try:
-                position = self.create_position(pr, changes, comment.file, comment.start_line, comment.end_line)
+                position = self.create_position(pr, changes, comment.file, comment.line)
                 if position:
                     head_commit = pr.get_commits().reversed[0]
                     pr_comment = pr.create_review_comment(
@@ -440,14 +438,14 @@ class GitHubReview(BaseReview):
                     print(f"Created comment: {pr_comment}")
                 else:
                     print(
-                        f"Warning: Could not create position for file {comment.file} line {comment.end_line}. Skipping comment.")
+                        f"Warning: Could not create position for file {comment.file} line {comment.line}. Skipping comment.")
             except Exception as e:
                 print(f"Failed to create comment. Error type: {type(e).__name__}")
                 print(f"Error message: {str(e)}")
                 print(
-                    f"Comment details: File: {comment.file}, Line: {comment.end_line}, Comment: {comment.comment[:50]}...")
+                    f"Comment details: File: {comment.file}, Line: {comment.line}, Comment: {comment.comment[:50]}...")
 
-    def create_position(self, pr, changes, file_path, target_line, end_line):
+    def create_position(self, pr, changes, file_path, target_line):
         for change in changes['changes']:
             if change['new_path'] == file_path:
                 old_line, new_line = self.find_line_numbers(change['diff'], target_line)

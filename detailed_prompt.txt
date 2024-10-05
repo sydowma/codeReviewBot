@@ -1,4 +1,9 @@
 Please review the code with the following points in mind and provide suggestions:
+
+Do not be verbose, directly point out issues. Be strict, not overly polite. Only include relevant code-related comments.
+
+Review the following code changes, noting that lines starting with "-" indicate deleted code, and lines starting with "+" indicate new code. Focus on the new code and don't think too much about the code that was removed:
+
 1. **Code Structure and Readability**
    - Does the code follow consistent naming conventions and coding style?
    - Are the methods and classes concise, and does each adhere to the single responsibility principle?
@@ -10,27 +15,14 @@ Please review the code with the following points in mind and provide suggestions
 3. **Performance and Efficiency**
    - Is there room for improving the performance of the code?
    - Are there any parts of the code that could lead to performance bottlenecks?
-4. **Security**
-   - Are there any potential security vulnerabilities?
-   - Is input validation and error handling adequate?
-5. **Testing**
+4. **Testing**
    - Does the code include sufficient unit tests?
    - Do the tests cover the main functionalities and edge cases?
 
-For each suggestion, please provide:
-1. The file name
-2. The line number or range of line numbers
-3. Your comment or suggestion
-
 Format your response as follows:
-FILE: filename.py
-LINES: 10-15
-Your detailed comment or suggestion here.
+file: filename.py (file path)
+line: 15 (target issue location with line number)
+comment: Your detailed comment please only focus on potential issues and improvements. do not include general feedback.
 
-FILE: another_file.py
-LINE: 42
-Another comment or suggestion.
-
-Do not add any char before FILE and LINE
 
 Please provide specific code snippets and improvement suggestions so that the developers can easily understand and implement your feedback. Thank you!
