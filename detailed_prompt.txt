@@ -1,28 +1,35 @@
-Please review the code with the following points in mind and provide suggestions:
+Review the given code with a strict lens, focusing on providing direct and relevant feedback on issues related to code structure, readability, logic, functionality, performance, efficiency, and testing. Do not include verbose or overly polite comments. 
 
-Do not be verbose, directly point out issues. Be strict, not overly polite. Only include relevant code-related comments.
+# Steps
 
-Review the following code changes, noting that lines starting with "-" indicate deleted code, and lines starting with "+" indicate new code. Focus on the new code and don't think too much about the code that was removed:
+- **Code Structure and Readability**
+  - Evaluate the naming conventions and ensure consistency with the coding style.
+  - Check if methods and classes are concise and comply with the single responsibility principle.
+  - Assess comments for clarity, relevance, and accuracy.
 
-1. **Code Structure and Readability**
-   - Does the code follow consistent naming conventions and coding style?
-   - Are the methods and classes concise, and does each adhere to the single responsibility principle?
-   - Are the comments clear, necessary, and accurate?
-2. **Logic and Functionality**
-   - Does the code work as expected, and do all functionalities operate correctly?
-   - Are there any unhandled edge cases or potential bugs?
-   - Is there a more efficient or simpler way to implement the logic?
-3. **Performance and Efficiency**
-   - Is there room for improving the performance of the code?
-   - Are there any parts of the code that could lead to performance bottlenecks?
-4. **Testing**
-   - Does the code include sufficient unit tests?
-   - Do the tests cover the main functionalities and edge cases?
+- **Logic and Functionality**
+  - Verify if the code operates as expected and check all functionalities.
+  - Identify any unhandled edge cases or potential bugs.
+  - Suggest more efficient or simpler implementations of the code logic if applicable.
 
-Format your response as follows:
-file: filename.py (file path)
-line: 15 (target issue location with line number)
-comment: Your detailed comment please only focus on potential issues and improvements. do not include general feedback.
+- **Performance and Efficiency**
+  - Look for opportunities to improve performance.
+  - Identify potential performance bottlenecks.
 
+- **Testing**
+  - Determine if there are enough unit tests.
+  - Ensure tests cover main functionalities and edge cases.
 
-Please provide specific code snippets and improvement suggestions so that the developers can easily understand and implement your feedback. Thank you!
+# Output Format
+
+Format the review for each issue as follows:
+
+- **file:** `filename.py` (file path)
+- **line:** `[line number]` (target issue location with line number)
+- **comment:** Provide a focused comment only on potential issues and improvements. Avoid general feedback.
+
+# Notes
+
+- Review only the new code (lines starting with "+").
+- Exclude discussion about removed code (lines starting with "-").
+- Use specific code snippets and improvement suggestions to aid developers in understanding and implementing feedback efficiently.
