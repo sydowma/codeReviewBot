@@ -246,25 +246,45 @@ class BaseReview(ABC):
         pass
 
     def find_line_numbers(self, diff, target_line):
+        """
+                Parse diff and find the correct line numbers for commenting
+                """
         lines = diff.split('\n')
-        old_line = new_line = 0
+        current_line = 0
+        in_added_lines = False
+        old_line = 0
+        new_line = 0
+
         for line in lines:
             if line.startswith('@@'):
                 # Parse the hunk header
-                match = re.match(r'@@ -(\d+),\d+ \+(\d+),\d+ @@', line)
+                match = re.match(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
                 if match:
-                    old_line = int(match.group(1)) - 1
-                    new_line = int(match.group(2)) - 1
+                    old_line = int(match.group(1))
+                    new_line = int(match.group(2))
+                    current_line = 0
+                    continue
+
+            if line.startswith('-'):
+                old_line += 1
+                in_added_lines = False
             elif line.startswith('+'):
                 new_line += 1
-            elif line.startswith('-'):
-                old_line += 1
+                current_line += 1
+                in_added_lines = True
             else:
                 old_line += 1
                 new_line += 1
+                current_line += 1
+                in_added_lines = False
 
-            if new_line == target_line:
+            if current_line == target_line:
+                # For added lines, we want the new line number
+                if in_added_lines:
+                    return old_line - 1, new_line
+                # For context lines, we want both old and new line numbers
                 return old_line, new_line
+
         return None, None
 
     def generate_line_code(self, file_path, old_line, new_line):
@@ -327,45 +347,65 @@ class GitLabReview(BaseReview):
         prompt = self.summary_prompt if summary_only else self.detailed_prompt
         return prompt + "\n\n" + mr_infomation + "\n\n".join(files_content)
 
-    def submit_comments(self, mr, comments, changes):
-        for comment in comments:
-            try:
-                position = self.create_position(mr, changes, comment['file'], comment['line'])
-                if position:
-                    mr.discussions.create({
-                        'body': comment['comment'],
-                        'position': position
-                    })
-                else:
-                    print(f"Warning: Could not create position for file {comment['file']} line {comment['line']}. Skipping comment.")
-            except gitlab.exceptions.GitlabCreateError as e:
-                print(f"Failed to create comment: {e}")
-                print(f"Comment details: File: {comment['file']}, Line: {comment['line']}, Comment: {comment['comment'][:50]}...")
+    def submit_comments(self, pr: PullRequest, comments: list[ReviewComment], changes):
+        """
+        Submit review comments to the pull request with proper positioning
+        """
+        try:
+            # Start a new review
+            review_comments = []
 
-    def create_position(self, mr, changes, file_path, line_number):
+            for comment in comments:
+                try:
+                    position = self.create_position(pr, changes, comment.file, comment.line)
+                    if position:
+                        review_comments.append({
+                            'path': position['path'],
+                            'position': position['position'],
+                            'body': comment.comment,
+                            'line': position['line'],
+                            'side': position['side']
+                        })
+                    else:
+                        print(f"Warning: Could not create position for file {comment.file} line {comment.line}")
+                except Exception as e:
+                    print(f"Error creating comment position: {str(e)}")
+                    continue
+
+            if review_comments:
+                # Submit all comments as a single review
+                head_commit = pr.get_commits().reversed[0]
+                pr.create_review(
+                    commit=head_commit,
+                    comments=review_comments,
+                    event='COMMENT'
+                )
+        except Exception as e:
+            print(f"Failed to submit review comments: {str(e)}")
+
+    def create_position(self, pr: PullRequest, changes, file_path: str, target_line: int):
+        """
+        Create the correct position object for GitHub review comments
+        """
         for change in changes['changes']:
             if change['new_path'] == file_path:
-                old_line, new_line = self.find_line_numbers(change['diff'], line_number)
+                old_line, new_line = self.find_line_numbers(change['diff'], target_line)
+
                 if old_line is not None and new_line is not None:
+                    # For added/modified lines
                     return {
-                        'base_sha': mr.diff_refs['base_sha'],
-                        'start_sha': mr.diff_refs['start_sha'],
-                        'head_sha': mr.diff_refs['head_sha'],
-                        'position_type': 'text',
-                        'new_path': file_path,
-                        'new_line': new_line,
-                        'old_path': change['old_path'],
-                        'old_line': old_line,
-                        'line_range': {
-                            'start': {
-                                'line_code': self.generate_line_code(file_path, old_line, new_line),
-                                'type': 'new'
-                            },
-                            'end': {
-                                'line_code': self.generate_line_code(file_path, old_line, new_line),
-                                'type': 'new'
-                            }
-                        }
+                        'path': file_path,
+                        'position': new_line,
+                        'line': new_line,
+                        'side': 'RIGHT'
+                    }
+                elif old_line is not None:
+                    # For deleted lines
+                    return {
+                        'path': file_path,
+                        'position': old_line,
+                        'line': old_line,
+                        'side': 'LEFT'
                     }
         return None
 
@@ -403,15 +443,26 @@ class GitHubReview(BaseReview):
         pull_request_number = int(parts[-1])
         return repo_full_name, pull_request_number
 
-    def get_pull_request_changes(self, pr):
+    def get_pull_request_changes(self, pr: PullRequest):
+        """
+        Get changes with improved diff handling
+        """
         files = pr.get_files()
         changes = {'changes': []}
+
         for file in files:
-            changes['changes'].append({
-                'new_path': file.filename,
-                'old_path': file.previous_filename or file.filename,
-                'diff': file.patch
-            })
+            if file.patch:  # Only include files with actual changes
+                change = {
+                    'new_path': file.filename,
+                    'old_path': file.previous_filename or file.filename,
+                    'diff': file.patch,
+                    'status': file.status,  # Added, Modified, Removed
+                    'additions': file.additions,
+                    'deletions': file.deletions,
+                    'changes': file.changes
+                }
+                changes['changes'].append(change)
+
         return changes
 
     def build_review_request(self, changes, summary_only: bool, mr_infomation: str):
@@ -445,16 +496,29 @@ class GitHubReview(BaseReview):
                 print(
                     f"Comment details: File: {comment.file}, Line: {comment.line}, Comment: {comment.comment[:50]}...")
 
-    def create_position(self, pr, changes, file_path, target_line):
+    def create_position(self, pr: PullRequest, changes, file_path: str, target_line: int):
+        """
+        Create the correct position object for GitHub review comments
+        """
         for change in changes['changes']:
             if change['new_path'] == file_path:
                 old_line, new_line = self.find_line_numbers(change['diff'], target_line)
+
                 if old_line is not None and new_line is not None:
+                    # For added/modified lines
                     return {
                         'path': file_path,
                         'position': new_line,
                         'line': new_line,
                         'side': 'RIGHT'
+                    }
+                elif old_line is not None:
+                    # For deleted lines
+                    return {
+                        'path': file_path,
+                        'position': old_line,
+                        'line': old_line,
+                        'side': 'LEFT'
                     }
         return None
 
