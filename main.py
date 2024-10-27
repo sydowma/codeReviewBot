@@ -21,6 +21,8 @@ from github.PullRequest import PullRequest
 from openai import OpenAI
 from pydantic import BaseModel
 
+from review_request_builder import ReviewRequestBuilder
+
 # 最后一次拉取的PR编号，服务启动后设置默认值
 LATEST_PULL_REQUEST_NUMBER: int = 0
 
@@ -226,7 +228,7 @@ class BaseReview(ABC):
         return result
 
     @abstractmethod
-    def review_code_changes(self, url: str, summary_only: bool = False):
+    def review_code_changes(self, url: str, summary_only: bool, custom_prompt: str):
         pass
 
     @abstractmethod
@@ -234,7 +236,7 @@ class BaseReview(ABC):
         pass
 
     @abstractmethod
-    def build_review_request(self, changes: object, summary_only: bool, mr_information: str) -> object:
+    def build_review_request(self, changes: object, summary_only: bool, mr_information: str, custom_prompt: str) -> object:
         pass
 
     @abstractmethod
@@ -296,7 +298,7 @@ class GitLabReview(BaseReview):
         super().__init__()
         self.gl = gitlab.Gitlab(GITLAB_URL, private_token=GITLAB_TOKEN)
 
-    def review_code_changes(self, merge_request_url: str, summary_only: bool):
+    def review_code_changes(self, merge_request_url: str, summary_only: bool, custom_prompt: str):
         try:
             project_id, merge_request_iid = self.parse_url(merge_request_url)
             project = self.gl.projects.get(project_id)
@@ -333,7 +335,7 @@ class GitLabReview(BaseReview):
         merge_request_iid = parts[-1]
         return project_id, merge_request_iid
 
-    def build_review_request(self, changes, summary_only, mr_infomation: str):
+    def build_review_request(self, changes, summary_only, mr_infomation: str, custom_prompt: str):
         files_content = []
         for change in changes['changes']:
             is_update: bool = change['new_path'] == change['old_path']
@@ -414,14 +416,14 @@ class GitHubReview(BaseReview):
         super().__init__()
         self.gh = Github(GITHUB_TOKEN)
 
-    def review_code_changes(self, pull_request_url: str, summary_only: bool):
+    def review_code_changes(self, pull_request_url: str, summary_only: bool, custom_prompt: str):
         try:
             repo_full_name, pull_request_number = self.parse_url(pull_request_url)
             repo = self.gh.get_repo(repo_full_name)
             pr = repo.get_pull(pull_request_number)
             changes = self.get_pull_request_changes(pr)
             body: str = self.get_body(pr)
-            review_request = self.build_review_request(changes, summary_only, body)
+            review_request = self.build_review_request(changes, summary_only, body, custom_prompt)
             review_result = self.call_ai_api(review_request, summary_only)
             parsed_result = self.parse_review_result(review_result, summary_only)
 
@@ -443,7 +445,7 @@ class GitHubReview(BaseReview):
         pull_request_number = int(parts[-1])
         return repo_full_name, pull_request_number
 
-    def get_pull_request_changes(self, pr: PullRequest):
+    def get_pull_request_changes(self, pr: PullRequest) -> dict:
         """
         Get changes with improved diff handling
         """
@@ -465,13 +467,18 @@ class GitHubReview(BaseReview):
 
         return changes
 
-    def build_review_request(self, changes, summary_only: bool, mr_infomation: str):
-        files_content = []
-        for change in changes['changes']:
-            files_content.append(f"File: {change['new_path']}\n\n{change['diff']}")
-
-        prompt = self.summary_prompt if summary_only else self.detailed_prompt
-        return prompt + "\n\n" + mr_infomation + "\n\n" + "\n\n".join(files_content)
+    def build_review_request(self, changes: dict, summary_only: bool, mr_infomation: str, custom_prompt: str):
+        builder = ReviewRequestBuilder()
+        try:
+            return builder.build_review_request(
+                changes=changes,
+                summary_only=summary_only,
+                mr_information=mr_infomation,
+                custom_prompt=custom_prompt
+            )
+        except ValueError as e:
+            print(e)
+            print(f"Error: {e}")
 
     def submit_comments(self, pr, comments: list[ReviewComment], changes):
         for comment in comments:
@@ -564,6 +571,7 @@ def cli():
     parser.add_argument("url", help="URL of the GitLab merge request or GitHub pull request to review")
     parser.add_argument("--summary", action="store_true", default=True, help="Generate a summary review")
     parser.add_argument("--no-summary", action="store_false", dest="summary", help="Do not generate a summary review")
+    parser.add_argument("--prompt", help="Custom prompt")
     args = parser.parse_args()
 
     if "gitlab" in args.url:
@@ -578,7 +586,8 @@ def cli():
     review.ai_provider = AI_PROVIDER
     review.model = MODEL
 
-    result = review.review_code_changes(args.url, args.summary)
+    user_prompt = args.prompt or ''
+    result = review.review_code_changes(args.url, args.summary, user_prompt)
     if result["status"] == "success":
         print(result["message"])
     else:
