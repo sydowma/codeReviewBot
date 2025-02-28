@@ -28,10 +28,11 @@ This tool automates code reviews for GitLab merge requests and GitHub pull reque
    cd codeReviewBot
    ```
 
-2. Install the required packages:
+2. Install the required packages using `uv`:
    ```
-   pip install -r requirements.txt
+   uv pip install -r requirements.txt
    ```
+   **Note**: Ensure `uv` is installed globally or within your project environment. You can install it with `pip install uv` or via your package manager if not already set up.
 
 3. Set up your configuration:
    - Create a `config.json` file with your GitLab, GitHub, and OpenAI API credentials.
@@ -51,6 +52,7 @@ python main.py <url_to_merge_request_or_pull_request> [--summary-only]
    ```
    uvicorn main:app --host 0.0.0.0 --port 8000
    ```
+   **Note**: If `uvicorn` isn't available in your environment, ensure it's installed with `uv pip install uvicorn`.
 
 2. Send a POST request to `http://localhost:8000/review` with the following JSON body:
    ```json
@@ -108,10 +110,11 @@ You can customize the review prompts by modifying the `detailed_prompt.txt` and 
    cd codeReviewBot
    ```
 
-2. 安装所需包：
+2. 使用 `uv` 安装所需包：
    ```
-   pip install -r requirements.txt
+   uv pip install -r requirements.txt
    ```
+   **注意**：确保 `uv` 已全局安装或在您的项目环境中可用。您可以通过 `pip install uv` 或使用您的包管理器安装它。
 
 3. 设置配置：
    - 创建一个`config.json`文件，包含您的GitLab、GitHub和OpenAI API凭证。
@@ -131,6 +134,7 @@ python main.py <合并请求或拉取请求的url> [--summary-only]
    ```
    uvicorn main:app --host 0.0.0.0 --port 8000
    ```
+   **注意**：如果环境中缺少 `uvicorn`，请使用 `uv pip install uvicorn` 安装。
 
 2. 向`http://localhost:8000/review`发送POST请求，JSON体如下：
    ```json
@@ -155,3 +159,13 @@ python main.py <合并请求或拉取请求的url> [--summary-only]
 ## 自定义
 
 您可以通过修改`detailed_prompt.txt`和`summary_prompt.txt`文件来自定义审查提示。
+
+---
+
+### Key Changes Made:
+1. Replaced `pip install -r requirements.txt` with `uv pip install -r requirements.txt` to align with your use of `uv`.
+2. Added a note about ensuring `uv` is installed, as it’s not part of the default Python setup.
+3. Included a note about installing `uvicorn` with `uv` if it’s missing when running the FastAPI server.
+4. Kept the rest of the structure and content intact, as the refactoring request was specifically about replacing `pip` with `uv`.
+
+Let me know if you need further adjustments or assistance with integrating `uv` into your workflow!
